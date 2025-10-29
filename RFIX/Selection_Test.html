@@ -648,103 +648,76 @@
 
     async function ApplyZDeltaUI() {
       const A = window.ACAPI;
-      if (!A) {
-        AddLog('[UI] ACAPI недоступен');
-        return;
-      }
+      if (!A) { AddLog('[ZDelta] ACAPI недоступен'); return; }
 
-      const offsetStr = document.getElementById('groundOffset').value;
-      const offsetMm = parseFloat(offsetStr);
-      
-      if (isNaN(offsetMm)) {
-        AddLog('[UI] Неверное значение смещения');
-        setInfo("info-ground", "❌ Неверное значение смещения");
-        return;
-      }
+      const btn = document.getElementById('btnApplyOffset');
+      btn?.setAttribute('disabled','disabled');
 
-      const offsetM = offsetMm / 1000.0;
-      AddLog('[UI] Применение смещения Z: ' + offsetMm + ' мм (' + offsetM + ' м)');
-      setInfo("info-ground", "Применение смещения...");
+      const mm = parseNumber(document.getElementById('groundOffset'), 0);
+      const meters = mm / 1000.0;
+      AddLog('[ZDelta] ΔZ = ' + mm + ' мм (' + meters + ' м)');
+      if (!isFinite(meters)) { setInfo('info-ground','Некорректное значение смещения'); btn?.removeAttribute('disabled'); return; }
+      if (Math.abs(meters) < 1e-9) AddLog('[ZDelta] WARNING: delta≈0 — визуально может не измениться');
 
-      // Захватываем текущие объекты из выделения, чтобы смещение точно применилось
-      if (typeof A.SetGroundObjects === 'function') {
-        try {
-          const okSet = await A.SetGroundObjects();
-          if (!okSet) {
-            AddLog('[UI] ❌ Объекты не установлены из выделения');
-            setInfo("info-ground", "❌ Выделите объекты и повторите");
-            return;
-          }
-        } catch (err) {
-          AddLog('[UI] ❌ Ошибка вызова SetGroundObjects: ' + err);
-          setInfo("info-ground", "❌ Ошибка: " + err);
-          return;
+      try {
+        const okObjs = await A.SetGroundObjects();
+        AddLog('[ZDelta] SetGroundObjects → ' + okObjs);
+        if (!okObjs) { setInfo('info-ground','Выберите объекты/колонны/светильники.'); return; }
+
+        let applied = false;
+        if (typeof A.SetZDelta === 'function' && typeof A.ApplyZDelta === 'function' && A.ApplyZDelta.length === 0) {
+          // НОВЫЙ протокол: сначала буфером (строкой), потом вызов без аргумента
+          AddLog('[ZDelta] Новый протокол: SetZDelta(m as string) → ApplyZDelta()');
+          await A.SetZDelta(meters.toString());
+          applied = await A.ApplyZDelta();
+        } else if (typeof A.ApplyZDelta === 'function' && A.ApplyZDelta.length >= 1) {
+          // СТАРЫЙ протокол: ApplyZDelta(meters)
+          AddLog('[ZDelta] Старый протокол: ApplyZDelta(meters)');
+          applied = await A.ApplyZDelta(meters);
+        } else {
+          throw new Error('ACAPI.ApplyZDelta недоступен');
         }
-      }
 
-      if (typeof A.ApplyZDelta === 'function') {
-        try {
-          const success = await A.ApplyZDelta(offsetM);
-          if (success) {
-            AddLog('[UI] ✅ Смещение применено успешно');
-            setInfo("info-ground", "✅ Смещение применено: " + offsetMm + " мм");
-          } else {
-            AddLog('[UI] ❌ Ошибка применения смещения');
-            setInfo("info-ground", "❌ Ошибка применения смещения (проверьте выделение)");
-          }
-        } catch (err) {
-          AddLog('[UI] ❌ Ошибка вызова ApplyZDelta: ' + err);
-          setInfo("info-ground", "❌ Ошибка: " + err);
-        }
-      } else {
-        AddLog('[UI] ❌ Функция ApplyZDelta недоступна');
-        setInfo("info-ground", "❌ Функция недоступна (обновите плагин)");
+        setInfo('info-ground', applied ? ' Смещение выполнено (' + mm + ' мм)' : ' Ошибка смещения');
+        AddLog('[ZDelta] Apply → ' + applied);
+        if (applied) UpdateSelectedElements();
+      } catch (e) {
+        AddLog('[ZDelta] Ошибка: ' + e);
+        setInfo('info-ground','Ошибка смещения — см. лог');
+      } finally {
+        btn?.removeAttribute('disabled');
       }
     }
 
     async function LandToMeshUI() {
       const A = window.ACAPI;
-      if (!A) {
-        AddLog('[UI] ACAPI недоступен');
-        return;
-      }
+      if (!A) { AddLog('[Ground] ACAPI недоступен'); return; }
 
-      AddLog('[UI] Приземление на 3D-сетку');
-      setInfo("info-ground", "Приземление на 3D-сетку...");
+      const btnApply = document.getElementById('btnApplyOffset');
+      const btnLand  = document.getElementById('btnLand');
+      btnApply?.setAttribute('disabled','disabled');
+      btnLand ?.setAttribute('disabled','disabled');
+      setInfo('info-ground','Приземляю на поверхность…');
 
-      // Сначала автоматически устанавливаем 3D-сетку и объекты из текущего выделения
       try {
-        // Устанавливаем 3D-сетку
-        AddLog('[UI] Установка 3D-сетки из выделения...');
-        const surfaceSuccess = await A.SetGroundSurface();
-        if (!surfaceSuccess) {
-          AddLog('[UI] ❌ Не удалось установить 3D-сетку');
-          setInfo("info-ground", "❌ Не удалось установить 3D-сетку. Убедитесь, что в выделении есть 3D-сетка");
-          return;
-        }
+        const okSurf = await A.SetGroundSurface();
+        AddLog('[Ground] SetGroundSurface → ' + okSurf);
+        if (!okSurf) { setInfo('info-ground','Выберите Поверхность (3D-сетку).'); return; }
 
-        // Устанавливаем объекты
-        AddLog('[UI] Установка объектов из выделения...');
-        const objectsSuccess = await A.SetGroundObjects();
-        if (!objectsSuccess) {
-          AddLog('[UI] ❌ Не удалось установить объекты');
-          setInfo("info-ground", "❌ Не удалось установить объекты. Убедитесь, что в выделении есть объекты для приземления");
-          return;
-        }
+        const okObjs = await A.SetGroundObjects();
+        AddLog('[Ground] SetGroundObjects → ' + okObjs);
+        if (!okObjs) { setInfo('info-ground','Выберите объекты/колонны/светильники.'); return; }
 
-        // Теперь выполняем приземление
-        AddLog('[UI] Выполнение приземления...');
-        const success = await A.ApplyGroundOffset(0.0);
-        if (success) {
-          AddLog('[UI] ✅ Приземление выполнено успешно');
-          setInfo("info-ground", "✅ Объекты приземлены на 3D-сетку");
-        } else {
-          AddLog('[UI] ❌ Ошибка приземления');
-          setInfo("info-ground", "❌ Ошибка приземления");
-        }
-      } catch (err) {
-        AddLog('[UI] ❌ Ошибка: ' + err);
-        setInfo("info-ground", "❌ Ошибка: " + err);
+        const applied = await A.ApplyGroundOffset(0.0); // offset игнорируется на C++
+        AddLog('[Ground] ApplyGroundOffset(0) → ' + applied);
+        setInfo('info-ground', applied ? ' Приземлено на Mesh' : ' Ошибка приземления');
+        if (applied) UpdateSelectedElements();
+      } catch (e) {
+        AddLog('[Ground] Ошибка: ' + e);
+        setInfo('info-ground','Ошибка при приземлении — см. лог');
+      } finally {
+        btnApply?.removeAttribute('disabled');
+        btnLand ?.removeAttribute('disabled');
       }
     }
 
